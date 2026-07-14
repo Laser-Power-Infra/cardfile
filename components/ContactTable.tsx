@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { Pencil, Trash2, Loader2, Filter, X as XIcon } from "lucide-react";
+import { Pencil, Trash2, Loader2, X as XIcon } from "lucide-react";
 
 import type { CardData } from "@/types/card";
 import EditContactModal from "./EditContactModal";
@@ -16,15 +16,6 @@ type ContactTableProps = {
   onContactDeleted?: (id: string) => void;
 };
 
-interface FilterState {
-  name: string;
-  company: string;
-  email: string;
-  phone: string;
-}
-
-const EMPTY_FILTERS: FilterState = { name: "", company: "", email: "", phone: "" };
-
 interface CompanyBriefState {
   status: "loading" | "done" | "empty" | "error";
   overview?: string;
@@ -32,6 +23,33 @@ interface CompanyBriefState {
 
 /** How many company-brief lookups run at once — keeps a big contact list from firing 50 parallel OpenAI calls at once. */
 const BRIEF_CONCURRENCY = 3;
+
+// ==========================================
+// Column visibility
+// Clicking a header shows ONLY that column (plus Actions, which is
+// always visible). Clicking the same header again — or the "Show all"
+// button — restores every column.
+// ==========================================
+type ColumnKey =
+  | "name"
+  | "company"
+  | "jobTitle"
+  | "email"
+  | "mobile"
+  | "telephone"
+  | "website"
+  | "brief";
+
+const COLUMNS: { key: ColumnKey; label: string }[] = [
+  { key: "name", label: "Name" },
+  { key: "company", label: "Company" },
+  { key: "jobTitle", label: "Job Title" },
+  { key: "email", label: "Email" },
+  { key: "mobile", label: "Mobile" },
+  { key: "telephone", label: "Telephone" },
+  { key: "website", label: "Website" },
+  { key: "brief", label: "Company Brief" },
+];
 
 export default function ContactTable({
   contacts,
@@ -50,8 +68,14 @@ export default function ContactTable({
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [deleteError, setDeleteError] = useState<string | null>(null);
 
-  const [filters, setFilters] = useState<FilterState>(EMPTY_FILTERS);
-  const [filtersOpen, setFiltersOpen] = useState(false);
+  // null = show every column. Otherwise, show only the clicked column.
+  const [activeColumn, setActiveColumn] = useState<ColumnKey | null>(null);
+
+  const showColumn = (key: ColumnKey) =>
+    activeColumn === null || activeColumn === key;
+
+  const toggleColumn = (key: ColumnKey) =>
+    setActiveColumn((prev) => (prev === key ? null : key));
 
   const [companyBriefs, setCompanyBriefs] = useState<Record<string, CompanyBriefState>>({});
 
@@ -103,37 +127,10 @@ export default function ContactTable({
     return Array.from(seen.values());
   }, [contacts]);
 
-  // ==========================================
-  // Field-level filtering (Name / Company / Email / Phone)
-  // ==========================================
-  const filtered = useMemo(() => {
-    const name = filters.name.trim().toLowerCase();
-    const company = filters.company.trim().toLowerCase();
-    const email = filters.email.trim().toLowerCase();
-    const phone = filters.phone.replace(/[\s+-]/g, "");
-
-    if (!name && !company && !email && !phone) return deduped;
-
-    return deduped.filter((contact) => {
-      if (name && !(contact.fullName ?? "").toLowerCase().includes(name)) return false;
-      if (company && !(contact.company ?? "").toLowerCase().includes(company)) return false;
-      if (email && !(contact.emails ?? []).some((e) => e.toLowerCase().includes(email))) return false;
-      if (phone) {
-        const allPhones = [...(contact.mobileNumbers ?? []), ...(contact.telephoneNumbers ?? [])].map((p) =>
-          p.replace(/[\s+-]/g, "")
-        );
-        if (!allPhones.some((p) => p.includes(phone))) return false;
-      }
-      return true;
-    });
-  }, [deduped, filters]);
-
-  const hasActiveFilters = Object.values(filters).some((v) => v.trim() !== "");
-
-  // Reset to page 1 whenever the filters change, so you don't land on an empty page.
-  useEffect(() => {
-    setPage(1);
-  }, [filters]);
+  // `filtered` name kept as-is below (pagination, company-brief lookup,
+  // etc. all key off it) — it's just the deduped list now that the
+  // field-level filter bar has been removed.
+  const filtered = deduped;
 
   // ==========================================
   // Auto-fetch a Company Brief for every unique company in the current
@@ -262,68 +259,22 @@ export default function ContactTable({
 
   return (
     <div>
-      {/* =========================
-          Filter bar
-      ========================== */}
-      <div className="mb-4 rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-        <button
-          type="button"
-          onClick={() => setFiltersOpen((v) => !v)}
-          className="inline-flex items-center gap-2 text-sm font-medium text-slate-700"
-        >
-          <Filter size={16} />
-          Filters
-          {hasActiveFilters && (
-            <span className="rounded-full bg-sky-600 px-2 py-0.5 text-xs text-white">
-              {Object.values(filters).filter((v) => v.trim()).length}
-            </span>
-          )}
-        </button>
-
-        {filtersOpen && (
-          <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
-            <input
-              type="text"
-              value={filters.name}
-              onChange={(e) => setFilters((f) => ({ ...f, name: e.target.value }))}
-              placeholder="Filter by name"
-              className="rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-sky-400 focus:ring-2 focus:ring-sky-100"
-            />
-            <input
-              type="text"
-              value={filters.company}
-              onChange={(e) => setFilters((f) => ({ ...f, company: e.target.value }))}
-              placeholder="Filter by company"
-              className="rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-sky-400 focus:ring-2 focus:ring-sky-100"
-            />
-            <input
-              type="text"
-              value={filters.email}
-              onChange={(e) => setFilters((f) => ({ ...f, email: e.target.value }))}
-              placeholder="Filter by email"
-              className="rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-sky-400 focus:ring-2 focus:ring-sky-100"
-            />
-            <input
-              type="text"
-              value={filters.phone}
-              onChange={(e) => setFilters((f) => ({ ...f, phone: e.target.value }))}
-              placeholder="Filter by phone number"
-              className="rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-sky-400 focus:ring-2 focus:ring-sky-100"
-            />
-
-            {hasActiveFilters && (
-              <button
-                type="button"
-                onClick={() => setFilters(EMPTY_FILTERS)}
-                className="inline-flex items-center gap-1.5 self-start text-xs font-medium text-slate-500 hover:text-slate-800"
-              >
-                <XIcon size={14} />
-                Clear filters
-              </button>
-            )}
-          </div>
-        )}
-      </div>
+      {activeColumn && (
+        <div className="mb-4 flex items-center justify-between rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 text-sm text-sky-800">
+          <span>
+            Showing only the{" "}
+            <strong>{COLUMNS.find((c) => c.key === activeColumn)?.label}</strong> column
+          </span>
+          <button
+            type="button"
+            onClick={() => setActiveColumn(null)}
+            className="inline-flex items-center gap-1.5 text-xs font-medium text-sky-700 hover:text-sky-900"
+          >
+            <XIcon size={14} />
+            Show all columns
+          </button>
+        </div>
+      )}
 
       {deleteError && (
         <div className="mb-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
@@ -331,47 +282,30 @@ export default function ContactTable({
         </div>
       )}
 
-      {filtered.length === 0 ? (
-        <div className="rounded-xl border border-slate-200 p-6 text-center text-slate-500">
-          No contacts match these filters.
-        </div>
-      ) : (
-        <>
-          <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white shadow-sm">
+      <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white shadow-sm">
             <table className="min-w-full table-auto border-collapse text-sm text-slate-700">
               <thead>
                 <tr className="border-b border-slate-200 bg-slate-50 text-left text-xs uppercase tracking-[0.16em] text-slate-500">
-                  <th className="px-4 py-3 font-medium">
-                    Name
-                  </th>
-
-                  <th className="px-4 py-3 font-medium">
-                    Company
-                  </th>
-
-                  <th className="px-4 py-3 font-medium">
-                    Job Title
-                  </th>
-
-                  <th className="px-4 py-3 font-medium">
-                    Email
-                  </th>
-
-                  <th className="px-4 py-3 font-medium">
-                    Mobile
-                  </th>
-
-                  <th className="px-4 py-3 font-medium">
-                    Telephone
-                  </th>
-
-                  <th className="px-4 py-3 font-medium">
-                    Website
-                  </th>
-
-                  <th className="px-4 py-3 font-medium">
-                    Company Brief
-                  </th>
+                  {COLUMNS.filter((col) => showColumn(col.key)).map((col) => (
+                    <th key={col.key} className="px-4 py-3 font-medium">
+                      <button
+                        type="button"
+                        onClick={() => toggleColumn(col.key)}
+                        title={
+                          activeColumn === col.key
+                            ? "Click to show all columns"
+                            : `Click to show only ${col.label}`
+                        }
+                        className={`uppercase tracking-[0.16em] transition ${
+                          activeColumn === col.key
+                            ? "text-sky-600"
+                            : "hover:text-slate-800"
+                        }`}
+                      >
+                        {col.label}
+                      </button>
+                    </th>
+                  ))}
 
                   <th className="px-4 py-3 font-medium">
                     Actions
@@ -392,66 +326,82 @@ export default function ContactTable({
                         }`}
                       className="border-b border-slate-200 transition-colors hover:bg-sky-50"
                     >
-                      <td className="px-4 py-3">
-                        {contact.fullName || "-"}
-                      </td>
+                      {showColumn("name") && (
+                        <td className="px-4 py-3">
+                          {contact.fullName || "-"}
+                        </td>
+                      )}
 
-                      <td className="px-4 py-3">
-                        {contact.company || "-"}
-                      </td>
+                      {showColumn("company") && (
+                        <td className="px-4 py-3">
+                          {contact.company || "-"}
+                        </td>
+                      )}
 
-                      <td className="px-4 py-3">
-                        {contact.jobTitle || "-"}
-                      </td>
+                      {showColumn("jobTitle") && (
+                        <td className="px-4 py-3">
+                          {contact.jobTitle || "-"}
+                        </td>
+                      )}
 
-                      <td className="px-4 py-3">
-                        {contact.emails?.[0] || "-"}
-                      </td>
+                      {showColumn("email") && (
+                        <td className="px-4 py-3">
+                          {contact.emails?.[0] || "-"}
+                        </td>
+                      )}
 
-                      <td className="px-4 py-3">
-                        {contact.mobileNumbers?.[0] || "-"}
-                      </td>
+                      {showColumn("mobile") && (
+                        <td className="px-4 py-3">
+                          {contact.mobileNumbers?.[0] || "-"}
+                        </td>
+                      )}
 
-                      <td className="px-4 py-3">
-                        {contact.telephoneNumbers?.[0] || "-"}
-                      </td>
+                      {showColumn("telephone") && (
+                        <td className="px-4 py-3">
+                          {contact.telephoneNumbers?.[0] || "-"}
+                        </td>
+                      )}
 
-                      <td className="px-4 py-3">
-                        {contact.website ? (
-                          <a
-                            href={contact.website}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="text-sky-600 underline hover:text-sky-800"
-                          >
-                            Visit
-                          </a>
-                        ) : (
-                          "-"
-                        )}
-                      </td>
+                      {showColumn("website") && (
+                        <td className="px-4 py-3">
+                          {contact.website ? (
+                            <a
+                              href={contact.website}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="text-sky-600 underline hover:text-sky-800"
+                            >
+                              Visit
+                            </a>
+                          ) : (
+                            "-"
+                          )}
+                        </td>
+                      )}
 
                       {/* =========================
                           COMPANY BRIEF COLUMN
                       ========================== */}
-                      <td className="max-w-xs px-4 py-3">
-                        {!contact.company ? (
-                          "-"
-                        ) : !brief || brief.status === "loading" ? (
-                          <span className="inline-flex items-center gap-1.5 text-xs text-slate-400">
-                            <Loader2 size={12} className="animate-spin" />
-                            Looking up...
-                          </span>
-                        ) : brief.status === "done" ? (
-                          <p className="line-clamp-2 text-xs text-slate-600" title={brief.overview}>
-                            {brief.overview}
-                          </p>
-                        ) : brief.status === "error" ? (
-                          <span className="text-xs text-red-500">Lookup failed</span>
-                        ) : (
-                          <span className="text-xs text-slate-400">No public info found</span>
-                        )}
-                      </td>
+                      {showColumn("brief") && (
+                        <td className="max-w-xs px-4 py-3">
+                          {!contact.company ? (
+                            "-"
+                          ) : !brief || brief.status === "loading" ? (
+                            <span className="inline-flex items-center gap-1.5 text-xs text-slate-400">
+                              <Loader2 size={12} className="animate-spin" />
+                              Looking up...
+                            </span>
+                          ) : brief.status === "done" ? (
+                            <p className="line-clamp-2 text-xs text-slate-600" title={brief.overview}>
+                              {brief.overview}
+                            </p>
+                          ) : brief.status === "error" ? (
+                            <span className="text-xs text-red-500">Lookup failed</span>
+                          ) : (
+                            <span className="text-xs text-slate-400">No public info found</span>
+                          )}
+                        </td>
+                      )}
 
                       {/* =========================
                           ACTIONS COLUMN
@@ -560,8 +510,6 @@ export default function ContactTable({
             </div>
 
           </div>
-        </>
-      )}
 
       {/* =========================
           Edit Contact Modal
