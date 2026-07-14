@@ -7,7 +7,7 @@ import type { CardData } from "@/types/card";
 
 interface EditContactModalProps {
     open: boolean;
-    contact: CardData | null;
+    contact: CardData | null; 
     onClose: () => void;
     onSaved?: (updatedContact: CardData) => void;
 }
